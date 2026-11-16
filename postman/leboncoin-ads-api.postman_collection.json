@@ -1,0 +1,188 @@
+{
+  "info": {
+    "name": "Leboncoin Ads API (local)",
+    "description": "Requests for the local Docker Compose stack. Start it with `docker compose up --build -d` before sending requests. The collection uses seeded user IDs and updates `adId` after creating an ad.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "00000000-0000-0000-0000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "adId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "importKey",
+      "value": "ads-import-demo-001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/health",
+        "description": "Checks that the Ads API is responding."
+      },
+      "response": []
+    },
+    {
+      "name": "List ads",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/ads",
+        "description": "Lists ads. Optional filters: title, user_id, min_price, max_price."
+      },
+      "response": []
+    },
+    {
+      "name": "List bikes above 10",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/ads?title=bike&min_price=10.00",
+        "description": "Example of title and decimal price filters."
+      },
+      "response": []
+    },
+    {
+      "name": "Get seeded ad 1",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/ads/1",
+        "description": "Reads a seeded ad and resolves its owner's username through the identity service."
+      },
+      "response": []
+    },
+    {
+      "name": "Create ad",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{userId}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Mountain bike from Postman\",\n  \"price\": 120.50,\n  \"photo_url\": \"https://example.com/bike.jpg\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/ads",
+        "description": "Creates an ad for userId. The test script stores the response ID in the adId collection variable for the following request. The API allows five direct publications per user over a rolling 24-hour period."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Ad created', function () { pm.response.to.have.status(201); });",
+              "if (pm.response.code === 201) {",
+              "  const body = pm.response.json();",
+              "  pm.collectionVariables.set('adId', String(body.id));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "Get created ad",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/ads/{{adId}}",
+        "description": "Reads the adId variable. Run Create ad first to fetch the new ad."
+      },
+      "response": []
+    },
+    {
+      "name": "Delete created ad (destructive)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{userId}}",
+            "type": "text"
+          }
+        ],
+        "url": "{{baseUrl}}/ads/{{adId}}",
+        "description": "Deletes adId if it belongs to userId. This request changes data; run only when you want to remove that ad."
+      },
+      "response": []
+    },
+    {
+      "name": "Import ads (idempotent)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{userId}}",
+            "type": "text"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{importKey}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ads\": [\n    {\n      \"title\": \"Desk from Postman import\",\n      \"price\": 45.00,\n      \"photo_url\": \"https://example.com/desk.jpg\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/ads/import",
+        "description": "Imports a batch atomically. Replaying the same body with the same key returns the original IDs. Change importKey before sending a different batch. Imports do not consume the direct-post quota."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Batch imported or replayed', function () { pm.response.to.have.status(201); });"
+            ]
+          }
+        }
+      ],
+      "response": []
+    }
+  ]
+}

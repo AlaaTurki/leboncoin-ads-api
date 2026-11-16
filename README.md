@@ -97,6 +97,10 @@ docker compose exec -T ads-database psql -U ads -d ads -f /docker-entrypoint-ini
 docker compose exec -T ads-database psql -U ads -d ads -f /docker-entrypoint-initdb.d/004_create_ad_creation_events.sql
 ```
 
+## Postman collection
+
+There is no web frontend in this project; it exposes an HTTP API. Import [the Postman collection](postman/leboncoin-ads-api.postman_collection.json) to try the local endpoints. Start the Docker Compose stack first, then use the collection variables `baseUrl`, `userId`, `adId`, and `importKey`. Run **Create ad** before **Get created ad** or **Delete created ad**; the create request saves its ID automatically. The delete request removes data. For a different import payload, change `importKey` first.
+
 ## API
 
 | Method | Path | Auth | Description |
