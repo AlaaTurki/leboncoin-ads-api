@@ -2,7 +2,7 @@ openapi: "3.0.3"
 
 info:
   title: Ads API
-  description: Classified ads — list, read, and create ads.
+  description: Classified ads — list, read, create, and delete ads.
   version: "1.0.0"
 
 servers:
@@ -37,22 +37,22 @@ paths:
           schema:
             type: string
           example: "00000000-0000-0000-0000-000000000001"
-        - name: min_price_cents
+        - name: min_price
           in: query
-          description: Inclusive lower bound on the price (in cents). 0 means no lower bound.
+          description: Inclusive lower bound on the price in the currency unit. 0 means no lower bound.
           schema:
-            type: integer
-            format: int64
+            type: number
+            format: float
             minimum: 0
-          example: 5000
-        - name: max_price_cents
+          example: 50.00
+        - name: max_price
           in: query
-          description: Inclusive upper bound on the price (in cents). 0 means no upper bound.
+          description: Inclusive upper bound on the price in the currency unit. 0 means no upper bound.
           schema:
-            type: integer
-            format: int64
+            type: number
+            format: float
             minimum: 0
-          example: 50000
+          example: 500.00
       responses:
         "200":
           description: List of matching ads (may be empty).
@@ -86,6 +86,45 @@ paths:
           description: Malformed or unknown request body field.
         "401":
           description: Missing Authorization header.
+        "429":
+          description: Posting quota exceeded (five ads in the previous 24 hours).
+        "500":
+          description: Unexpected server error.
+        "502":
+          description: The identity service could not return the ad owner's username.
+
+  /ads/import:
+    post:
+      summary: Import ads atomically
+      operationId: importAds
+      tags: [ads]
+      security:
+        - userID: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ads]
+              properties:
+                ads:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/CreateAdBody"
+      responses:
+        "201":
+          description: All ads imported or original IDs replayed for an identical retry.
+        "400":
+          description: Invalid body or missing/invalid idempotency key.
+        "409":
+          description: Idempotency key reused with a different payload.
         "500":
           description: Unexpected server error.
 
@@ -115,6 +154,30 @@ paths:
           description: No ad exists with this ID.
         "500":
           description: Unexpected server error.
+        "502":
+          description: The identity service is unavailable while resolving the owner's username.
+    delete:
+      summary: Delete an ad owned by the authenticated user
+      operationId: deleteAd
+      tags: [ads]
+      security:
+        - userID: []
+      parameters:
+        - name: adID
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Ad deleted.
+        "401":
+          description: Missing Authorization header.
+        "404":
+          description: Ad does not exist or belongs to another user.
+        "500":
+          description: Unexpected server error.
 
 components:
   securitySchemes:
@@ -127,7 +190,7 @@ components:
   schemas:
     Ad:
       type: object
-      required: [id, title, price_cents, photo_url, user_id, created_at]
+      required: [id, title, price, username, photo_url, user_id, created_at]
       properties:
         id:
           type: integer
@@ -136,11 +199,15 @@ components:
         title:
           type: string
           example: mountain bike
-        price_cents:
-          type: integer
-          format: int64
-          description: Price in euro cents.
-          example: 15000
+        price:
+          type: number
+          format: float
+          description: Price in the currency unit, with up to two decimal places.
+          example: 150.00
+        username:
+          type: string
+          description: Nickname of the ad owner.
+          example: alice
         photo_url:
           type: string
           example: https://example.com/bike.jpg
@@ -159,20 +226,47 @@ components:
         ads:
           type: array
           items:
-            $ref: "#/components/schemas/Ad"
+            $ref: "#/components/schemas/AdSummary"
+
+    AdSummary:
+      type: object
+      required: [id, title, price, photo_url, user_id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        title:
+          type: string
+          example: mountain bike
+        price:
+          type: number
+          format: float
+          description: Price in the currency unit, with up to two decimal places.
+          example: 150.00
+        photo_url:
+          type: string
+          example: https://example.com/bike.jpg
+        user_id:
+          type: string
+          example: "00000000-0000-0000-0000-000000000001"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:00:00Z"
 
     CreateAdBody:
       type: object
-      required: [title, price_cents, photo_url]
+      required: [title, price, photo_url]
       properties:
         title:
           type: string
           example: mountain bike
-        price_cents:
-          type: integer
-          format: int64
-          description: Price in euro cents.
-          example: 15000
+        price:
+          type: number
+          format: float
+          description: Price in the currency unit, with up to two decimal places.
+          example: 150.00
         photo_url:
           type: string
           example: https://example.com/bike.jpg

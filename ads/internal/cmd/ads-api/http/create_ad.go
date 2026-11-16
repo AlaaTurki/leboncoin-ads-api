@@ -2,6 +2,9 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
+	adsdao "github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/dao"
+	"math"
 	"net/http"
 
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/usecase"
@@ -9,9 +12,9 @@ import (
 )
 
 type createAdBody struct {
-	Title      string `json:"title"`
-	PriceCents int64  `json:"price_cents"`
-	PhotoURL   string `json:"photo_url"`
+	Title    string  `json:"title"`
+	Price    float64 `json:"price"`
+	PhotoURL string  `json:"photo_url"`
 }
 
 type createAdResponse struct {
@@ -27,13 +30,20 @@ func handlerCreateAd(createAd usecase.CreateAdFunc) http.HandlerFunc {
 			return
 		}
 
+		cents, ok := priceToCents(body.Price)
+		if !ok {
+			http.Error(rw, "price must be a non-negative amount with at most two decimals", http.StatusBadRequest)
+			return
+		}
 		adID, err := createAd(r.Context(), usecase.CreateAdRequest{
-			Title:      body.Title,
-			PriceCents: body.PriceCents,
-			PhotoURL:   body.PhotoURL,
-			OwnerID:    middleware.UserIDFromHeader(r),
+			Title: body.Title, PriceCents: cents, PhotoURL: body.PhotoURL,
+			OwnerID: middleware.UserIDFromRequest(r),
 		})
 		if err != nil {
+			if errors.Is(err, adsdao.ErrQuotaExceeded) {
+				http.Error(rw, err.Error(), http.StatusTooManyRequests)
+				return
+			}
 			rw.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -42,4 +52,16 @@ func handlerCreateAd(createAd usecase.CreateAdFunc) http.HandlerFunc {
 		rw.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(rw).Encode(createAdResponse{ID: int64(adID)})
 	}
+}
+
+func priceToCents(price float64) (int64, bool) {
+	if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 || price >= float64(math.MaxInt64)/100 {
+		return 0, false
+	}
+	scaled := price * 100
+	rounded := math.Round(scaled)
+	if math.Abs(scaled-rounded) > 1e-7 {
+		return 0, false
+	}
+	return int64(rounded), true
 }

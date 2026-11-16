@@ -14,6 +14,7 @@ import (
 	adsdao "github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/dao"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/domain"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/usecase"
+	usersclient "github.mpi-internal.com/leboncoin/backend-hiring-assessment/users/pkg"
 )
 
 func newGetAdServer(fn usecase.GetAdByIDFunc) *httptest.Server {
@@ -51,10 +52,26 @@ func TestHandlerGetAd(t *testing.T) {
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
 		assert.Equal(t, int64(42), got.ID)
 		assert.Equal(t, "mountain bike", got.Title)
-		assert.Equal(t, int64(15000), got.PriceCents)
+		assert.Equal(t, float64(150), got.Price)
 		assert.Equal(t, "https://example.com/bike.jpg", got.PhotoURL)
 		assert.Equal(t, "user-1", got.UserID)
 		assert.Equal(t, createdAt, got.CreatedAt)
+	})
+
+	t.Run("adds the owner's username", func(t *testing.T) {
+		mux := http.NewServeMux()
+		client := &stubUserClient{user: usersclient.User{UserID: "user-1", Nickname: "alice"}}
+		mux.Handle("GET /ads/{adID}", handlerGetAd(func(_ context.Context, id domain.AdID) (domain.Ad, error) {
+			return domain.Ad{ID: id, UserID: "user-1"}, nil
+		}, client))
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+		resp, err := http.Get(srv.URL + "/ads/42")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		var got getAdResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+		assert.Equal(t, "alice", got.Username)
 	})
 
 	t.Run("returns 400 when adID is not a number", func(t *testing.T) {

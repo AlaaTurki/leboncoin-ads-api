@@ -5,13 +5,17 @@ import (
 
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/usecase"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/common/middleware"
+	usersclient "github.mpi-internal.com/leboncoin/backend-hiring-assessment/users/pkg"
 )
 
 // Usecases groups the business functions the HTTP layer depends on.
 type Usecases struct {
-	ListAds  usecase.ListAdsFunc
-	GetAd    usecase.GetAdByIDFunc
-	CreateAd usecase.CreateAdFunc
+	ListAds   usecase.ListAdsFunc
+	GetAd     usecase.GetAdByIDFunc
+	CreateAd  usecase.CreateAdFunc
+	ImportAds usecase.ImportAdsFunc
+	DeleteAd  usecase.DeleteAdFunc
+	Users     usersclient.UserClient
 }
 
 // NewRouter wires the routes of the API.
@@ -19,9 +23,10 @@ func NewRouter(usecases Usecases) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /ads", handlerListAds(usecases.ListAds))
-	mux.Handle("GET /ads/{adID}", handlerGetAd(usecases.GetAd))
+	mux.Handle("GET /ads/{adID}", handlerGetAd(usecases.GetAd, usecases.Users))
 	mux.Handle("POST /ads", middleware.RequireAuth(handlerCreateAd(usecases.CreateAd)))
-	mux.Handle("POST /ads/import", middleware.RequireAuth(handlerImportAds(usecases.CreateAd)))
+	mux.Handle("POST /ads/import", middleware.RequireAuth(handlerImportAds(usecases.CreateAd, usecases.ImportAds)))
+	mux.Handle("DELETE /ads/{adID}", middleware.RequireAuth(handlerDeleteAd(usecases.DeleteAd)))
 
 	mux.HandleFunc("GET /health", func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusOK)

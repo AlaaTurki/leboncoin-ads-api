@@ -42,7 +42,7 @@ func postJSON(t *testing.T, url string, body any, authHeader string) *http.Respo
 func TestHandlerCreateAd(t *testing.T) {
 	validBody := createAdBody{
 		Title:      "mountain bike",
-		PriceCents: 15000,
+		Price: 150.00,
 		PhotoURL:   "https://example.com/bike.jpg",
 	}
 

@@ -11,12 +11,12 @@ import (
 )
 
 type listAdsItem struct {
-	ID         int64     `json:"id"`
-	Title      string    `json:"title"`
-	PriceCents int64     `json:"price_cents"`
-	PhotoURL   string    `json:"photo_url"`
-	UserID     string    `json:"user_id"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID        int64     `json:"id"`
+	Title     string    `json:"title"`
+	Price     float64   `json:"price"`
+	PhotoURL  string    `json:"photo_url"`
+	UserID    string    `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type listAdsResponse struct {
@@ -25,12 +25,12 @@ type listAdsResponse struct {
 
 func adToListAdsItem(a domain.Ad) listAdsItem {
 	return listAdsItem{
-		ID:         int64(a.ID),
-		Title:      a.Title,
-		PriceCents: a.Price,
-		PhotoURL:   a.PhotoURL,
-		UserID:     a.UserID.String(),
-		CreatedAt:  a.CreatedAt.UTC(),
+		ID:        int64(a.ID),
+		Title:     a.Title,
+		Price:     float64(a.Price) / 100,
+		PhotoURL:  a.PhotoURL,
+		UserID:    a.UserID.String(),
+		CreatedAt: a.CreatedAt.UTC(),
 	}
 }
 
@@ -47,24 +47,34 @@ func handlerListAds(listAds usecase.ListAdsFunc) http.HandlerFunc {
 			req.OwnerID = ownerID
 		}
 
-		if raw := q.Get("min_price_cents"); raw != "" {
-			v, err := strconv.ParseInt(raw, 10, 64)
+		if raw := q.Get("min_price"); raw != "" {
+			v, err := strconv.ParseFloat(raw, 64)
 			if err != nil {
 				rw.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			req.MinPriceCents = v
+			cents, ok := priceToCents(v)
+			if !ok {
+				rw.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			req.MinPriceCents = cents
 		}
 
-		if raw := q.Get("max_price_cents"); raw != "" {
-			v, err := strconv.ParseInt(raw, 10, 64)
+		if raw := q.Get("max_price"); raw != "" {
+			v, err := strconv.ParseFloat(raw, 64)
 			if err != nil {
 				rw.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			req.MaxPriceCents = v
+			cents, ok := priceToCents(v)
+			if !ok {
+				rw.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			req.MaxPriceCents = cents
 		}
 
 		ads, err := listAds(r.Context(), req)

@@ -2,6 +2,10 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -175,6 +179,71 @@ func TestCreateAd(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, boom)
 		assert.NotErrorIs(t, err, adsdao.ErrUnknownOwner)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+func TestDeleteAd(t *testing.T) {
+	dao, mock := newMockDAO(t)
+	mock.ExpectExec("DELETE FROM ads").WithArgs(int64(9), "owner").WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, dao.DeleteAd(context.Background(), 9, "owner"))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRecordAdCreation(t *testing.T) {
+	dao, mock := newMockDAO(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO ad_creation_events").WithArgs("owner").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	tx, err := dao.Begin(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, tx.RecordAdCreation(context.Background(), "owner"))
+	require.NoError(t, tx.Commit())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestImportAdsIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	req := adsdao.CreateAdRequest{Title: "bike", PriceCents: 5000, PhotoURL: "https://example.com/bike.jpg", OwnerID: "00000000-0000-0000-0000-000000000001"}
+	payload, err := json.Marshal([]adsdao.CreateAdRequest{req})
+	require.NoError(t, err)
+	digest := sha256.Sum256(payload)
+	hash := hex.EncodeToString(digest[:])
+
+	t.Run("creates and records the batch in one transaction", func(t *testing.T) {
+		dao, mock := newMockDAO(t)
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(string(req.OwnerID) + ":batch-1").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery("SELECT request_hash, ad_ids").WithArgs(string(req.OwnerID), "batch-1").WillReturnError(sql.ErrNoRows)
+		mock.ExpectQuery("INSERT INTO ads").WithArgs(req.Title, req.PriceCents, req.PhotoURL, string(req.OwnerID)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)))
+		mock.ExpectExec("INSERT INTO ad_import_requests").WithArgs(string(req.OwnerID), "batch-1", hash, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+		got, err := dao.ImportAds(ctx, "batch-1", []adsdao.CreateAdRequest{req})
+		require.NoError(t, err)
+		assert.Equal(t, []domain.AdID{17}, got)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("returns previous IDs without reinserting on retry", func(t *testing.T) {
+		dao, mock := newMockDAO(t)
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(string(req.OwnerID) + ":batch-1").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery("SELECT request_hash, ad_ids").WithArgs(string(req.OwnerID), "batch-1").WillReturnRows(sqlmock.NewRows([]string{"request_hash", "ad_ids"}).AddRow(hash, []byte(`[17]`)))
+		mock.ExpectCommit()
+		got, err := dao.ImportAds(ctx, "batch-1", []adsdao.CreateAdRequest{req})
+		require.NoError(t, err)
+		assert.Equal(t, []domain.AdID{17}, got)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("rejects a key reused for another payload", func(t *testing.T) {
+		dao, mock := newMockDAO(t)
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(string(req.OwnerID) + ":batch-1").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery("SELECT request_hash, ad_ids").WithArgs(string(req.OwnerID), "batch-1").WillReturnRows(sqlmock.NewRows([]string{"request_hash", "ad_ids"}).AddRow("different", []byte(`[17]`)))
+		mock.ExpectRollback()
+		_, err := dao.ImportAds(ctx, "batch-1", []adsdao.CreateAdRequest{req})
+		assert.ErrorIs(t, err, adsdao.ErrIdempotencyConflict)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
 }

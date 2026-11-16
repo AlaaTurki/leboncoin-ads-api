@@ -2,7 +2,10 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -105,6 +108,134 @@ func (d *DAO) Rollback() error {
 	}
 
 	return nil
+}
+
+// DeleteAd removes an ad only when it belongs to ownerID.
+func (d *DAO) DeleteAd(ctx context.Context, id domain.AdID, ownerID domain.UserID) error {
+	result, err := d.runner().ExecContext(ctx, `DELETE FROM ads WHERE id = $1 AND user_id = $2::uuid`, int64(id), string(ownerID))
+	if err != nil {
+		return fmt.Errorf("unable to delete ad: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("unable to inspect delete result: %w", err)
+	}
+	if rows == 0 {
+		return adsdao.ErrNotFound
+	}
+	return nil
+}
+
+// LockOwnerForQuota serializes concurrent quota checks for the same owner.
+func (d *DAO) LockOwnerForQuota(ctx context.Context, ownerID domain.UserID) error {
+	if d.tx == nil {
+		return errors.New("quota lock requires a transaction")
+	}
+	if _, err := d.tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, string(ownerID)); err != nil {
+		return fmt.Errorf("unable to lock owner quota: %w", err)
+	}
+	return nil
+}
+
+// RecordAdCreation persists a user-facing publication event for quota enforcement.
+func (d *DAO) RecordAdCreation(ctx context.Context, ownerID domain.UserID) error {
+	if d.tx == nil {
+		return errors.New("ad creation event requires a transaction")
+	}
+	if _, err := d.tx.ExecContext(ctx, `INSERT INTO ad_creation_events (user_id) VALUES ($1::uuid)`, string(ownerID)); err != nil {
+		return fmt.Errorf("unable to record ad creation: %w", err)
+	}
+	return nil
+}
+
+// CountAdsSince counts user-facing publication events since the supplied timestamp.
+func (d *DAO) CountAdsSince(ctx context.Context, ownerID domain.UserID, since time.Time) (int, error) {
+	var count int
+	err := d.runner().QueryRowContext(ctx, `SELECT count(*) FROM ad_creation_events WHERE user_id = $1::uuid AND created_at >= $2`, string(ownerID), since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("unable to count recent ads: %w", err)
+	}
+	return count, nil
+}
+
+// ImportAds persists a batch and its result under an idempotency key.
+func (d *DAO) ImportAds(ctx context.Context, key string, requests []adsdao.CreateAdRequest) ([]domain.AdID, error) {
+	if d.tx != nil {
+		return nil, errors.New("bulk import cannot run inside an existing transaction")
+	}
+	if key == "" {
+		return nil, errors.New("idempotency key is required")
+	}
+	if len(requests) == 0 {
+		return []domain.AdID{}, nil
+	}
+	ownerID := requests[0].OwnerID
+	for _, req := range requests {
+		if req.OwnerID != ownerID {
+			return nil, errors.New("all imported ads must have the same owner")
+		}
+	}
+	payload, err := json.Marshal(requests)
+	if err != nil {
+		return nil, fmt.Errorf("unable to encode import request: %w", err)
+	}
+	digest := sha256.Sum256(payload)
+	requestHash := hex.EncodeToString(digest[:])
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to begin import transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	lockKey := string(ownerID) + ":" + key
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		return nil, fmt.Errorf("unable to lock import key: %w", err)
+	}
+	var previousHash string
+	var previousIDs []byte
+	err = tx.QueryRowContext(ctx, `SELECT request_hash, ad_ids FROM ad_import_requests WHERE owner_id = $1::uuid AND idempotency_key = $2`, string(ownerID), key).Scan(&previousHash, &previousIDs)
+	if err == nil {
+		if previousHash != requestHash {
+			return nil, adsdao.ErrIdempotencyConflict
+		}
+		var ids []int64
+		if err := json.Unmarshal(previousIDs, &ids); err != nil {
+			return nil, fmt.Errorf("unable to decode stored import result: %w", err)
+		}
+		result := make([]domain.AdID, len(ids))
+		for i, id := range ids {
+			result[i] = domain.AdID(id)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("unable to finish idempotent import: %w", err)
+		}
+		return result, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("unable to check import key: %w", err)
+	}
+	ids := make([]domain.AdID, 0, len(requests))
+	idValues := make([]int64, 0, len(requests))
+	for _, req := range requests {
+		var id domain.AdID
+		err := tx.QueryRowContext(ctx, `INSERT INTO ads (title, price_cents, photo_url, user_id) VALUES ($1, $2, $3, $4::uuid) RETURNING id`, req.Title, req.PriceCents, req.PhotoURL, string(req.OwnerID)).Scan(&id)
+		if err != nil {
+			return nil, fmt.Errorf("unable to insert imported ad: %w", err)
+		}
+		ids = append(ids, id)
+		idValues = append(idValues, int64(id))
+	}
+	encodedIDs, err := json.Marshal(idValues)
+	if err != nil {
+		return nil, fmt.Errorf("unable to encode import result: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO ad_import_requests (owner_id, idempotency_key, request_hash, ad_ids) VALUES ($1::uuid, $2, $3, $4::jsonb)`, string(ownerID), key, requestHash, encodedIDs)
+	if err != nil {
+		return nil, fmt.Errorf("unable to save import result: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("unable to commit import: %w", err)
+	}
+	return ids, nil
 }
 
 // SearchAds returns all ads matching the filters.

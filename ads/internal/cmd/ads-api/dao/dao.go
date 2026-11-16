@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"time"
 
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/domain"
 )
@@ -12,6 +13,14 @@ type Store interface {
 	CreateAd(ctx context.Context, req CreateAdRequest) (domain.AdID, error)
 	// GetAdByID returns a single ad, or ErrNotFound.
 	GetAdByID(ctx context.Context, id domain.AdID) (domain.Ad, error)
+	// DeleteAd removes an ad owned by ownerID.
+	DeleteAd(ctx context.Context, id domain.AdID, ownerID domain.UserID) error
+	// LockOwnerForQuota serializes quota checks for one owner within a transaction.
+	LockOwnerForQuota(ctx context.Context, ownerID domain.UserID) error
+	// RecordAdCreation stores a quota event for a user-facing ad creation.
+	RecordAdCreation(ctx context.Context, ownerID domain.UserID) error
+	// CountAdsSince returns the number of ads created by ownerID at or after since.
+	CountAdsSince(ctx context.Context, ownerID domain.UserID, since time.Time) (int, error)
 	// SearchAds returns all ads matching the filters.
 	SearchAds(ctx context.Context, req SearchAdsRequest) ([]domain.Ad, error)
 }
@@ -19,6 +28,8 @@ type Store interface {
 // DAO stores and retrieves ads.
 type DAO interface {
 	Store
+	// ImportAds creates a batch atomically and returns a stored result for an idempotent retry.
+	ImportAds(ctx context.Context, idempotencyKey string, requests []CreateAdRequest) ([]domain.AdID, error)
 	// Begin opens a transaction. Every call made on the returned Tx is part of it, and the caller must end it with Commit or Rollback.
 	Begin(ctx context.Context) (Tx, error)
 }
@@ -51,6 +62,10 @@ type CreateAdRequest struct {
 const (
 	// ErrNotFound is returned when no ad matches the requested identifier.
 	ErrNotFound sentinelError = "ad not found"
+	// ErrIdempotencyConflict is returned when a key is reused for a different import payload.
+	ErrIdempotencyConflict sentinelError = "idempotency key reused with different request"
+	// ErrQuotaExceeded is returned when an owner has reached the posting quota.
+	ErrQuotaExceeded sentinelError = "ad creation quota exceeded"
 	// ErrUnknownOwner is returned when an ad references a user that does not exist.
 	ErrUnknownOwner sentinelError = "unknown owner"
 )

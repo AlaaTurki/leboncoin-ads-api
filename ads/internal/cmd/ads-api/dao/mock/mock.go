@@ -3,6 +3,7 @@ package mock
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	adsdao "github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/dao"
@@ -23,6 +24,27 @@ func New(t *testing.T) *Mock {
 	t.Cleanup(func() { m.AssertExpectations(t) })
 
 	return m
+}
+
+// DeleteAd returns the configured delete result.
+func (m *Mock) DeleteAd(ctx context.Context, id domain.AdID, ownerID domain.UserID) error {
+	return m.Called(ctx, id, ownerID).Error(0)
+}
+
+// LockOwnerForQuota returns the configured lock result.
+func (m *Mock) LockOwnerForQuota(ctx context.Context, ownerID domain.UserID) error {
+	return m.Called(ctx, ownerID).Error(0)
+}
+
+// RecordAdCreation returns the configured event-recording result.
+func (m *Mock) RecordAdCreation(ctx context.Context, ownerID domain.UserID) error {
+	return m.Called(ctx, ownerID).Error(0)
+}
+
+// CountAdsSince returns the configured recent ad count.
+func (m *Mock) CountAdsSince(ctx context.Context, ownerID domain.UserID, since time.Time) (int, error) {
+	args := m.Called(ctx, ownerID, since)
+	return args.Int(0), args.Error(1)
 }
 
 // SearchAds returns the ads and the error set on the mock.
@@ -50,6 +72,13 @@ func (m *Mock) CreateAd(ctx context.Context, req adsdao.CreateAdRequest) (domain
 	adID, _ := args.Get(0).(domain.AdID)
 
 	return adID, args.Error(1)
+}
+
+// ImportAds returns the configured atomic import result.
+func (m *Mock) ImportAds(ctx context.Context, key string, reqs []adsdao.CreateAdRequest) ([]domain.AdID, error) {
+	args := m.Called(ctx, key, reqs)
+	ids, _ := args.Get(0).([]domain.AdID)
+	return ids, args.Error(1)
 }
 
 // Begin returns the mock itself as the transaction, so expectations stay set on a single object, and the error set on the mock.

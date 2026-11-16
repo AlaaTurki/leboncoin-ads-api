@@ -46,7 +46,7 @@ func TestHandlerListAds(t *testing.T) {
 		require.Len(t, got.Ads, 2)
 		assert.Equal(t, int64(1), got.Ads[0].ID)
 		assert.Equal(t, "bike", got.Ads[0].Title)
-		assert.Equal(t, int64(5000), got.Ads[0].PriceCents)
+		assert.Equal(t, float64(50), got.Ads[0].Price)
 		assert.Equal(t, int64(2), got.Ads[1].ID)
 	})
 
@@ -75,7 +75,7 @@ func TestHandlerListAds(t *testing.T) {
 		})
 		defer srv.Close()
 
-		resp, err := http.Get(srv.URL + "/ads?title=bike&user_id=user-3&min_price_cents=1000&max_price_cents=50000")
+		resp, err := http.Get(srv.URL + "/ads?title=bike&user_id=user-3&min_price=10.00&max_price=500.00")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
@@ -86,28 +86,28 @@ func TestHandlerListAds(t *testing.T) {
 		assert.Equal(t, int64(50000), received.MaxPriceCents)
 	})
 
-	t.Run("returns 400 when min_price_cents is not a number", func(t *testing.T) {
+	t.Run("returns 400 when min_price is not a number", func(t *testing.T) {
 		srv := newListAdsServer(func(_ context.Context, _ usecase.ListAdsRequest) ([]domain.Ad, error) {
 			t.Fatal("usecase should not be called")
 			return nil, nil
 		})
 		defer srv.Close()
 
-		resp, err := http.Get(srv.URL + "/ads?min_price_cents=not-a-number")
+		resp, err := http.Get(srv.URL + "/ads?min_price=not-a-number")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
 
-	t.Run("returns 400 when max_price_cents is not a number", func(t *testing.T) {
+	t.Run("returns 400 when max_price is not a number", func(t *testing.T) {
 		srv := newListAdsServer(func(_ context.Context, _ usecase.ListAdsRequest) ([]domain.Ad, error) {
 			t.Fatal("usecase should not be called")
 			return nil, nil
 		})
 		defer srv.Close()
 
-		resp, err := http.Get(srv.URL + "/ads?max_price_cents=abc")
+		resp, err := http.Get(srv.URL + "/ads?max_price=abc")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
