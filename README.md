@@ -1,95 +1,122 @@
-# Way of working
+# Leboncoin Ads API
 
-This repository is read-only, click on "Use this template" => "Create a new repository" and work on your copy just as you would on a live one. \
-Please make sure the first commit on your repo is the fresh copy of the original repository, please start your work from the second commit only. \
-Once you are satisfied with your work, please send your public repository url to the hiring manager.
+A Go HTTP API for classified ads, built for the Leboncoin backend hiring assessment. The implementation changes are limited to `/ads` and `/common`; the provided `/users` code remains untouched.
 
-# Hiring instructions
-
-Please refer to [these instructions](INSTRUCTIONS.md).
-
-# Ads API
-
-A small Go HTTP API around a single domain: *ads* (classified ads).
-
-The API needs an up-and-running postgres database, which can be launched via the provided Docker Compose file.
+See [INSTRUCTIONS.md](INSTRUCTIONS.md) for the assessment requirements.
 
 ## Requirements
 
-- Go 1.26 or later
-- Docker with the Compose plugin
+- Docker Desktop with Docker Compose
+- Go 1.26 or later to run the test suite locally
 
-## Launching the stack
+## Run locally on Windows
 
-```bash
-docker compose up -d
+Open PowerShell in the repository directory and make sure Docker Desktop is running. Start the API, PostgreSQL, and the identity service:
+
+```powershell
+docker compose up --build -d
+docker compose ps
 ```
 
-This starts PostgreSQL with the schema and seed data, the identity service, and the `ads` API.
+Wait for the services to become healthy, then check the API:
 
-## Model
+```powershell
+Invoke-RestMethod http://localhost:8080/health
+```
 
-There are 2 entities in this sample:
-- ad (title, price, etc...)
-- user (id and nickname only)
+The database is initialized with sample ads and users. Fetch a seeded ad (the response includes its owner's username and the decimal `price` field):
+
+```powershell
+Invoke-RestMethod http://localhost:8080/ads/1
+```
+
+List ads with optional filters:
+
+```powershell
+Invoke-RestMethod 'http://localhost:8080/ads?title=bike&min_price=10.00'
+```
+
+Create an ad. The `Authorization` value must be a user ID known to the identity service:
+
+```powershell
+$headers = @{ Authorization = "00000000-0000-0000-0000-000000000001" }
+$body = @{
+  title = "Mountain bike"
+  price = 120.50
+  photo_url = "https://example.com/bike.jpg"
+} | ConvertTo-Json
+
+$created = Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8080/ads `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+$created
+```
+
+Delete that ad as its owner:
+
+```powershell
+Invoke-WebRequest -Method Delete `
+  -Uri "http://localhost:8080/ads/$($created.id)" `
+  -Headers $headers
+```
+
+Bulk import is atomic and requires a unique `Idempotency-Key` for each batch. Retry the same payload with the same key to receive the original IDs:
+
+```powershell
+$headers = @{
+  Authorization = "00000000-0000-0000-0000-000000000001"
+  "Idempotency-Key" = "import-batch-001"
+}
+$body = @{
+  ads = @(
+    @{ title = "Desk"; price = 45.00; photo_url = "https://example.com/desk.jpg" }
+  )
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8080/ads/import `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Stop the services while retaining database data:
+
+```powershell
+docker compose down
+```
+
+### Existing database volume
+
+PostgreSQL runs initialization SQL only when its data volume is first created. If you started this project before migrations `003` and `004` were added, apply each migration once:
+
+```powershell
+docker compose exec -T ads-database psql -U ads -d ads -f /docker-entrypoint-initdb.d/003_create_ad_import_requests.sql
+docker compose exec -T ads-database psql -U ads -d ads -f /docker-entrypoint-initdb.d/004_create_ad_creation_events.sql
+```
 
 ## API
 
-| Method | Path          | Auth | Description                                                                       |
-|--------|---------------|------|-----------------------------------------------------------------------------------|
-| `POST` | `/ads`        | yes | Create an ad, subject to the rolling quota |
-| `GET` | `/ads/{id}`   | no | Get an ad and its owner's nickname |
-| `GET` | `/ads`        | no | List ads (filterable by `title`, `user_id`, `min_price`, `max_price`) |
-| `POST` | `/ads/import` | yes | Atomically import ads (requires an idempotency key) |
-| `DELETE` | `/ads/{id}` | yes | Delete an ad owned by the caller |
-
-```bash
-# Health check
-curl -s -v http://localhost:8080/health
-
-# List ads (with optional filters)
-curl -s 'http://localhost:8080/ads?title=bike&min_price=10.00'
-
-# Get a single ad
-curl -s http://localhost:8080/ads/1
-
-# Create an ad (price is in currency units; requires Authorization header)
-curl -s -X POST http://localhost:8080/ads \
-  -H 'Authorization: 00000000-0000-0000-0000-000000000001' \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Mountain bike","price":120.00,"photo_url":"https://example.com/photos/bike.jpg"}'
-```
-
-# Import ads with stable retry behavior (requires a unique key per batch)
-```bash
-curl -s -X POST http://localhost:8080/ads/import \
-  -H 'Authorization: 00000000-0000-0000-0000-000000000001' \
-  -H 'Idempotency-Key: import-2026-11-16-001' \
-  -H 'Content-Type: application/json' \
-  -d '{"ads":[{"title":"Mountain bike","price":120.00,"photo_url":"https://example.com/photos/bike.jpg"}]}'
-```
-
-## Authentication
-
-To pass authentication information to a call, simply add the `Authorization` header with the user ID in plain text.
-
-It will be extracted by the service.
-
-```
-Authorization: 00000000-0000-0000-0000-000000000001
-```
+| Method | Path | Auth | Description |
+|---|---|---:|---|
+| `GET` | `/health` | No | Health check |
+| `GET` | `/ads` | No | List ads; optional `title`, `user_id`, `min_price`, `max_price` filters |
+| `GET` | `/ads/{id}` | No | Get an ad and its owner's username |
+| `POST` | `/ads` | Yes | Create an ad; maximum five publications per rolling 24 hours |
+| `POST` | `/ads/import` | Yes | Atomically import ads using an `Idempotency-Key` header |
+| `DELETE` | `/ads/{id}` | Yes | Delete an ad owned by the caller |
 
 ## Tests
 
-To launch all the tests:
-
-```shell
+```powershell
 go test ./...
 ```
 
 ## Design notes
 
-- Prices remain stored as integer cents in PostgreSQL. The API accepts and returns `price` as a decimal number; requests with more than two decimal places are rejected. This avoids a database migration while preserving exact stored amounts. Renaming the public field is a breaking API change; a production rollout should publish it in a new API version or provide a deprecation window before removing the old field.
-- A single ad creation checks the rolling 24-hour quota under a per-owner PostgreSQL advisory transaction lock, so concurrent requests cannot exceed five; deleting an ad does not reset this counter. Publication events are recorded separately from ads. Bulk import is atomic: either the whole batch commits or none of it does.
-- Bulk import requires an `Idempotency-Key`. Ads and the response IDs are stored atomically with a payload hash. Reusing the same key and payload returns the original IDs; reusing it with a different payload is rejected.
-- `DELETE /ads/{id}` requires authentication and only deletes the caller's ad.
+- Prices remain stored as integer cents in PostgreSQL. The API accepts and returns `price` as a decimal number; requests with more than two decimal places are rejected. Renaming the public field is a breaking API change, so a production rollout should version the API or provide a deprecation window.
+- A single-ad creation checks the rolling 24-hour quota under a per-owner PostgreSQL advisory transaction lock. Publication events are stored separately from ads, so deleting an ad does not reset the quota. Bulk imports bypass this quota.
+- Bulk imports and their response IDs commit together. A stored payload hash lets identical retries replay the original IDs and rejects reuse of a key with a different payload.
+- Ad reads use a short-lived username cache to limit calls to the identity service.
