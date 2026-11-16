@@ -11,9 +11,10 @@ See [INSTRUCTIONS.md](INSTRUCTIONS.md) for the assessment requirements.
 
 ## Run locally on Windows
 
-Open PowerShell in the repository directory and make sure Docker Desktop is running. Start the API, PostgreSQL, and the identity service:
+Copy `.env.example` to `.env` in the repository root, open PowerShell in the repository directory, and make sure Docker Desktop is running. The `.env` file contains local Docker settings and is ignored by Git. Its `ADS_`-prefixed variables avoid collisions with environment variables from other projects. Start the API, PostgreSQL, and the identity service:
 
 ```powershell
+Copy-Item .env.example .env
 docker compose up --build -d
 docker compose ps
 ```
