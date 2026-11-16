@@ -30,6 +30,7 @@ func postJSON(t *testing.T, url string, body any, authHeader string) *http.Respo
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "test-key")
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
@@ -41,9 +42,9 @@ func postJSON(t *testing.T, url string, body any, authHeader string) *http.Respo
 
 func TestHandlerCreateAd(t *testing.T) {
 	validBody := createAdBody{
-		Title:      "mountain bike",
-		Price: 150.00,
-		PhotoURL:   "https://example.com/bike.jpg",
+		Title:    "mountain bike",
+		Price:    150.00,
+		PhotoURL: "https://example.com/bike.jpg",
 	}
 
 	t.Run("returns 201 with ID on success", func(t *testing.T) {

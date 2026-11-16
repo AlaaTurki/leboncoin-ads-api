@@ -5,6 +5,7 @@ import (
 	"errors"
 	usersclient "github.mpi-internal.com/leboncoin/backend-hiring-assessment/users/pkg"
 	usersapi "github.mpi-internal.com/leboncoin/backend-hiring-assessment/users/pkg/api"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -34,7 +35,7 @@ func adToGetAdResponse(a domain.Ad) getAdResponse {
 	}
 }
 
-func handlerGetAd(getAd usecase.GetAdByIDFunc, userClients ...usersclient.UserClient) http.HandlerFunc {
+func handlerGetAd(getAd usecase.GetAdByIDFunc, users usersclient.UserClient) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		adID, err := adIDFromURL(r)
 		if err != nil {
@@ -48,6 +49,7 @@ func handlerGetAd(getAd usecase.GetAdByIDFunc, userClients ...usersclient.UserCl
 			if errors.Is(err, adsdao.ErrNotFound) {
 				rw.WriteHeader(http.StatusNotFound)
 			} else {
+				slog.ErrorContext(r.Context(), "unable to get ad", "ad_id", adID, "error", err)
 				rw.WriteHeader(http.StatusInternalServerError)
 			}
 
@@ -55,9 +57,10 @@ func handlerGetAd(getAd usecase.GetAdByIDFunc, userClients ...usersclient.UserCl
 		}
 
 		response := adToGetAdResponse(ad)
-		if len(userClients) > 0 && userClients[0] != nil {
-			user, err := userClients[0].GetUserByID(r.Context(), ad.UserID)
+		if users != nil {
+			user, err := users.GetUserByID(r.Context(), ad.UserID)
 			if err != nil && !errors.Is(err, usersapi.ErrNotFound) {
+				slog.ErrorContext(r.Context(), "unable to load ad owner", "ad_id", adID, "error", err)
 				http.Error(rw, "unable to load ad owner", http.StatusBadGateway)
 				return
 			}

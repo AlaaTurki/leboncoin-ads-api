@@ -91,11 +91,12 @@ docker compose down
 
 ### Existing database volume
 
-PostgreSQL runs initialization SQL only when its data volume is first created. If you started this project before migrations `003` and `004` were added, apply each migration once:
+PostgreSQL runs initialization SQL only when its data volume is first created. If you started this project before migrations `003`, `004`, or `005` were added, apply each missing migration once:
 
 ```powershell
 docker compose exec -T ads-database psql -U ads -d ads -f /docker-entrypoint-initdb.d/003_create_ad_import_requests.sql
 docker compose exec -T ads-database psql -U ads -d ads -f /docker-entrypoint-initdb.d/004_create_ad_creation_events.sql
+docker compose exec -T ads-database psql -U ads -d ads -f /docker-entrypoint-initdb.d/005_add_ads_read_indexes.sql
 ```
 
 ## Postman collection
@@ -107,7 +108,7 @@ There is no web frontend in this project; it exposes an HTTP API. Import [the Po
 | Method | Path | Auth | Description |
 |---|---|---:|---|
 | `GET` | `/health` | No | Health check |
-| `GET` | `/ads` | No | List ads; optional `title`, `user_id`, `min_price`, `max_price` filters |
+| `GET` | `/ads` | No | List ads; filters plus `limit` (default 50, max 100) and `offset` pagination |
 | `GET` | `/ads/{id}` | No | Get an ad and its owner's username |
 | `POST` | `/ads` | Yes | Create an ad; maximum five publications per rolling 24 hours |
 | `POST` | `/ads/import` | Yes | Atomically import ads using an `Idempotency-Key` header |
@@ -125,3 +126,11 @@ go test ./...
 - A single-ad creation checks the rolling 24-hour quota under a per-owner PostgreSQL advisory transaction lock. Publication events are stored separately from ads, so deleting an ad does not reset the quota. Bulk imports bypass this quota.
 - Bulk imports and their response IDs commit together. A stored payload hash lets identical retries replay the original IDs and rejects reuse of a key with a different payload.
 - Ad reads use a short-lived username cache to limit calls to the identity service.
+
+# API notes
+
+`GET /ads` supports `limit` (default 50, maximum 100) and `offset` (default 0). Results are ordered newest first. Database indexes cover owner/date, price, and date ordering. Title substring search uses `ILIKE` and may need a trigram index if production query metrics show it is a bottleneck.
+
+Ad titles must contain 1–200 characters and `photo_url` must be an absolute HTTP(S) URL no longer than 2,048 characters. Imports accept at most 500 ads and 2 MiB per request. A quota response (`429`) includes `Retry-After` in seconds; the value is the configured 24-hour quota window.
+
+Prices use a JSON number to preserve the assessment API contract. The HTTP layer validates at most two decimal places and converts the value to integer cents immediately; persistence and calculations use cents, avoiding floating-point money arithmetic. A string decimal is an exact alternative for a new/versioned API, but changing the current field would break clients expecting a JSON number.

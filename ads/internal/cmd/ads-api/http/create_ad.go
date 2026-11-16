@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	adsdao "github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/dao"
+	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/usecase"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/common/middleware"
@@ -29,6 +31,10 @@ func handlerCreateAd(createAd usecase.CreateAdFunc) http.HandlerFunc {
 			rw.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		if err := validateAd(body.Title, body.PhotoURL); err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		cents, ok := priceToCents(body.Price)
 		if !ok {
@@ -41,9 +47,11 @@ func handlerCreateAd(createAd usecase.CreateAdFunc) http.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, adsdao.ErrQuotaExceeded) {
+				rw.Header().Set("Retry-After", strconv.Itoa(int(usecase.AdQuotaWindow.Seconds())))
 				http.Error(rw, err.Error(), http.StatusTooManyRequests)
 				return
 			}
+			slog.ErrorContext(r.Context(), "unable to create ad", "error", err)
 			rw.WriteHeader(http.StatusInternalServerError)
 			return
 		}

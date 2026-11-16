@@ -84,6 +84,8 @@ func TestHandlerListAds(t *testing.T) {
 		assert.Equal(t, domain.UserID("user-3"), received.OwnerID)
 		assert.Equal(t, int64(1000), received.MinPriceCents)
 		assert.Equal(t, int64(50000), received.MaxPriceCents)
+		assert.Equal(t, 50, received.Limit)
+		assert.Equal(t, 0, received.Offset)
 	})
 
 	t.Run("returns 400 when min_price is not a number", func(t *testing.T) {

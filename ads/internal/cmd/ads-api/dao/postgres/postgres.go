@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	adsdao "github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/dao"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/domain"
@@ -240,19 +239,26 @@ func (d *DAO) ImportAds(ctx context.Context, key string, requests []adsdao.Creat
 
 // SearchAds returns all ads matching the filters.
 func (d *DAO) SearchAds(ctx context.Context, req adsdao.SearchAdsRequest) ([]domain.Ad, error) {
+	if req.Limit <= 0 {
+		req.Limit = 50
+	}
 	const query = `
 		SELECT ` + adColumns + `
 		FROM ads
 		WHERE ($1 = '' OR user_id::text = $1)
 		  AND ($2 = 0 OR price_cents >= $2)
 		  AND ($3 = 0 OR price_cents <= $3)
-		  AND ($4 = '' OR title ILIKE '%' || $4 || '%')`
+		  AND ($4 = '' OR title ILIKE '%' || $4 || '%')
+		ORDER BY created_at DESC, id DESC
+		LIMIT $5 OFFSET $6`
 
 	rows, err := d.runner().QueryContext(ctx, query,
 		req.OwnerID,
 		req.MinPriceCents,
 		req.MaxPriceCents,
 		req.Title,
+		req.Limit,
+		req.Offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to search ads: %w", err)
@@ -298,11 +304,6 @@ func (d *DAO) CreateAd(ctx context.Context, req adsdao.CreateAdRequest) (domain.
 	var id domain.AdID
 	err := d.runner().QueryRowContext(ctx, query, req.Title, req.PriceCents, req.PhotoURL, string(req.OwnerID)).Scan(&id)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return 0, fmt.Errorf("unable to create ad: %w", adsdao.ErrUnknownOwner)
-		}
-
 		return 0, fmt.Errorf("unable to create ad: %w", err)
 	}
 

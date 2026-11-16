@@ -19,7 +19,7 @@ import (
 
 func newGetAdServer(fn usecase.GetAdByIDFunc) *httptest.Server {
 	mux := http.NewServeMux()
-	mux.Handle("GET /ads/{adID}", handlerGetAd(fn))
+	mux.Handle("GET /ads/{adID}", handlerGetAd(fn, nil))
 
 	return httptest.NewServer(mux)
 }

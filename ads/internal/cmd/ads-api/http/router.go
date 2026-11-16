@@ -25,7 +25,7 @@ func NewRouter(usecases Usecases) http.Handler {
 	mux.Handle("GET /ads", handlerListAds(usecases.ListAds))
 	mux.Handle("GET /ads/{adID}", handlerGetAd(usecases.GetAd, usecases.Users))
 	mux.Handle("POST /ads", middleware.RequireAuth(handlerCreateAd(usecases.CreateAd)))
-	mux.Handle("POST /ads/import", middleware.RequireAuth(handlerImportAds(usecases.CreateAd, usecases.ImportAds)))
+	mux.Handle("POST /ads/import", middleware.RequireAuth(handlerImportAds(usecases.ImportAds)))
 	mux.Handle("DELETE /ads/{adID}", middleware.RequireAuth(handlerDeleteAd(usecases.DeleteAd)))
 
 	mux.HandleFunc("GET /health", func(rw http.ResponseWriter, _ *http.Request) {

@@ -49,6 +49,8 @@ type SearchAdsRequest struct {
 	MinPriceCents int64
 	MaxPriceCents int64
 	Title         string
+	Limit         int
+	Offset        int
 }
 
 // CreateAdRequest carries the data needed to create an ad.
@@ -66,8 +68,6 @@ const (
 	ErrIdempotencyConflict sentinelError = "idempotency key reused with different request"
 	// ErrQuotaExceeded is returned when an owner has reached the posting quota.
 	ErrQuotaExceeded sentinelError = "ad creation quota exceeded"
-	// ErrUnknownOwner is returned when an ad references a user that does not exist.
-	ErrUnknownOwner sentinelError = "unknown owner"
 )
 
 type sentinelError string

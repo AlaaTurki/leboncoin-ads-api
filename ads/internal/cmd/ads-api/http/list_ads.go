@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -40,6 +41,23 @@ func handlerListAds(listAds usecase.ListAdsFunc) http.HandlerFunc {
 
 		req := usecase.ListAdsRequest{
 			Title: q.Get("title"),
+			Limit: 50,
+		}
+		if raw := q.Get("limit"); raw != "" {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v < 1 || v > 100 {
+				http.Error(rw, "limit must be between 1 and 100", http.StatusBadRequest)
+				return
+			}
+			req.Limit = v
+		}
+		if raw := q.Get("offset"); raw != "" {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v < 0 {
+				http.Error(rw, "offset must be a non-negative integer", http.StatusBadRequest)
+				return
+			}
+			req.Offset = v
 		}
 
 		if raw := q.Get("user_id"); raw != "" {
@@ -79,6 +97,7 @@ func handlerListAds(listAds usecase.ListAdsFunc) http.HandlerFunc {
 
 		ads, err := listAds(r.Context(), req)
 		if err != nil {
+			slog.ErrorContext(r.Context(), "unable to list ads", "error", err)
 			rw.WriteHeader(http.StatusInternalServerError)
 			return
 		}

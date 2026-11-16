@@ -11,7 +11,6 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	adsdao "github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/dao"
@@ -38,7 +37,7 @@ func TestSearchAds(t *testing.T) {
 			AddRow(int64(1), "bike", int64(5000), "https://example.com/bike.jpg", "user-1", createdAt).
 			AddRow(int64(2), "scooter", int64(12000), "https://example.com/scooter.jpg", "user-2", createdAt)
 		mock.ExpectQuery("SELECT").
-			WithArgs("", int64(0), int64(0), "").
+			WithArgs("", int64(0), int64(0), "", 50, 0).
 			WillReturnRows(rows)
 
 		got, err := dao.SearchAds(ctx, adsdao.SearchAdsRequest{})
@@ -55,7 +54,7 @@ func TestSearchAds(t *testing.T) {
 	t.Run("returns nil when no ads match", func(t *testing.T) {
 		dao, mock := newMockDAO(t)
 		mock.ExpectQuery("SELECT").
-			WithArgs("", int64(0), int64(0), "bike").
+			WithArgs("", int64(0), int64(0), "bike", 50, 0).
 			WillReturnRows(sqlmock.NewRows(adCols))
 
 		got, err := dao.SearchAds(ctx, adsdao.SearchAdsRequest{Title: "bike"})
@@ -69,7 +68,7 @@ func TestSearchAds(t *testing.T) {
 		dao, mock := newMockDAO(t)
 		boom := errors.New("db down")
 		mock.ExpectQuery("SELECT").
-			WithArgs("", int64(0), int64(0), "").
+			WithArgs("", int64(0), int64(0), "", 50, 0).
 			WillReturnError(boom)
 
 		_, err := dao.SearchAds(ctx, adsdao.SearchAdsRequest{})
@@ -153,20 +152,6 @@ func TestCreateAd(t *testing.T) {
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("returns ErrUnknownOwner on FK violation", func(t *testing.T) {
-		dao, mock := newMockDAO(t)
-		pgErr := &pgconn.PgError{Code: "23503"}
-		mock.ExpectQuery("INSERT").
-			WithArgs(req.Title, req.PriceCents, req.PhotoURL, string(req.OwnerID)).
-			WillReturnError(pgErr)
-
-		_, err := dao.CreateAd(ctx, req)
-
-		require.Error(t, err)
-		assert.ErrorIs(t, err, adsdao.ErrUnknownOwner)
-		require.NoError(t, mock.ExpectationsWereMet())
-	})
-
 	t.Run("returns error on other failures", func(t *testing.T) {
 		dao, mock := newMockDAO(t)
 		boom := errors.New("db down")
@@ -178,7 +163,6 @@ func TestCreateAd(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, boom)
-		assert.NotErrorIs(t, err, adsdao.ErrUnknownOwner)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
 }

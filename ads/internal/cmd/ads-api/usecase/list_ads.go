@@ -18,6 +18,8 @@ type (
 		MinPriceCents int64
 		MaxPriceCents int64
 		Title         string
+		Limit         int
+		Offset        int
 	}
 
 	listAds struct {
@@ -36,6 +38,8 @@ func (uc listAds) listAds(ctx context.Context, req ListAdsRequest) ([]domain.Ad,
 		MinPriceCents: req.MinPriceCents,
 		MaxPriceCents: req.MaxPriceCents,
 		Title:         req.Title,
+		Limit:         req.Limit,
+		Offset:        req.Offset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("unable to search ads: %w", err)

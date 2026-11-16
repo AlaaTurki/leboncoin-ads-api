@@ -84,21 +84,6 @@ func TestMock_CreateAd(t *testing.T) {
 		assert.Equal(t, domain.AdID(7), got)
 	})
 
-	t.Run("returns ErrUnknownOwner when owner does not exist", func(t *testing.T) {
-		m := mock.New(t)
-		req := adsdao.CreateAdRequest{
-			Title:      "bike",
-			PriceCents: 5000,
-			PhotoURL:   "https://example.com/bike.jpg",
-			OwnerID:    "ghost",
-		}
-
-		m.On("CreateAd", ctx, req).Return(domain.AdID(0), adsdao.ErrUnknownOwner)
-
-		_, err := m.CreateAd(ctx, req)
-
-		assert.ErrorIs(t, err, adsdao.ErrUnknownOwner)
-	})
 }
 
 func TestMock_Begin(t *testing.T) {

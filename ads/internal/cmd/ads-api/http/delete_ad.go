@@ -5,6 +5,7 @@ import (
 	adsdao "github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/dao"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/usecase"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/common/middleware"
+	"log/slog"
 	"net/http"
 )
 
@@ -12,6 +13,7 @@ func handlerDeleteAd(deleteAd usecase.DeleteAdFunc) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		id, err := adIDFromURL(r)
 		if err != nil {
+			slog.ErrorContext(r.Context(), "unable to delete ad", "ad_id", id, "error", err)
 			http.Error(rw, "invalid ad id", http.StatusBadRequest)
 			return
 		}

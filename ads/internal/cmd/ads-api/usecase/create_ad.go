@@ -9,6 +9,11 @@ import (
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/ads/internal/cmd/ads-api/domain"
 )
 
+const (
+	MaxAdsPerQuotaWindow = 5
+	AdQuotaWindow        = 24 * time.Hour
+)
+
 type (
 	// CreateAdFunc creates an ad owned by the calling user.
 	CreateAdFunc func(ctx context.Context, req CreateAdRequest) (domain.AdID, error)
@@ -41,11 +46,11 @@ func (uc createAd) createAd(ctx context.Context, req CreateAdRequest) (domain.Ad
 	if err := tx.LockOwnerForQuota(ctx, req.OwnerID); err != nil {
 		return 0, fmt.Errorf("unable to check ad quota: %w", err)
 	}
-	count, err := tx.CountAdsSince(ctx, req.OwnerID, time.Now().UTC().Add(-24*time.Hour))
+	count, err := tx.CountAdsSince(ctx, req.OwnerID, time.Now().UTC().Add(-AdQuotaWindow))
 	if err != nil {
 		return 0, fmt.Errorf("unable to check ad quota: %w", err)
 	}
-	if count >= 5 {
+	if count >= MaxAdsPerQuotaWindow {
 		return 0, adsdao.ErrQuotaExceeded
 	}
 

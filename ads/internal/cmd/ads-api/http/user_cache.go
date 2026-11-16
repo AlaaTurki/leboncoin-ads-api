@@ -2,14 +2,17 @@ package http
 
 import (
 	"context"
+	"errors"
 	"github.mpi-internal.com/leboncoin/backend-hiring-assessment/common/model"
 	usersclient "github.mpi-internal.com/leboncoin/backend-hiring-assessment/users/pkg"
+	usersapi "github.mpi-internal.com/leboncoin/backend-hiring-assessment/users/pkg/api"
 	"sync"
 	"time"
 )
 
 type cachedUser struct {
 	user      usersclient.User
+	err       error
 	expiresAt time.Time
 }
 type userLookup struct {
@@ -20,11 +23,12 @@ type userLookup struct {
 
 // cachedUserClient limits identity-service traffic on the read-heavy ad endpoint.
 type cachedUserClient struct {
-	client   usersclient.UserClient
-	ttl      time.Duration
-	mu       sync.Mutex
-	users    map[model.UserID]cachedUser
-	inFlight map[model.UserID]*userLookup
+	client      usersclient.UserClient
+	ttl         time.Duration
+	mu          sync.Mutex
+	users       map[model.UserID]cachedUser
+	inFlight    map[model.UserID]*userLookup
+	nextCleanup time.Time
 }
 
 func NewCachedUserClient(client usersclient.UserClient, ttl time.Duration) usersclient.UserClient {
@@ -34,9 +38,17 @@ func NewCachedUserClient(client usersclient.UserClient, ttl time.Duration) users
 func (c *cachedUserClient) GetUserByID(ctx context.Context, id model.UserID) (usersclient.User, error) {
 	now := time.Now()
 	c.mu.Lock()
+	if !now.Before(c.nextCleanup) {
+		for key, entry := range c.users {
+			if !now.Before(entry.expiresAt) {
+				delete(c.users, key)
+			}
+		}
+		c.nextCleanup = now.Add(c.ttl)
+	}
 	if entry, ok := c.users[id]; ok && now.Before(entry.expiresAt) {
 		c.mu.Unlock()
-		return entry.user, nil
+		return entry.user, entry.err
 	}
 	if pending, ok := c.inFlight[id]; ok {
 		c.mu.Unlock()
@@ -53,8 +65,8 @@ func (c *cachedUserClient) GetUserByID(ctx context.Context, id model.UserID) (us
 
 	pending.user, pending.err = c.client.GetUserByID(ctx, id)
 	c.mu.Lock()
-	if pending.err == nil && c.ttl > 0 {
-		c.users[id] = cachedUser{user: pending.user, expiresAt: time.Now().Add(c.ttl)}
+	if c.ttl > 0 && (pending.err == nil || errors.Is(pending.err, usersapi.ErrNotFound)) {
+		c.users[id] = cachedUser{user: pending.user, err: pending.err, expiresAt: time.Now().Add(c.ttl)}
 	}
 	delete(c.inFlight, id)
 	close(pending.done)

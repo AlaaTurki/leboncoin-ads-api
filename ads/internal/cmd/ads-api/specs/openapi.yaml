@@ -25,6 +25,19 @@ paths:
       operationId: listAds
       tags: [ads]
       parameters:
+        - name: limit
+          in: query
+          description: Maximum number of ads to return (default 50, maximum 100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Number of matching ads to skip (default 0).
+          schema:
+            type: integer
+            minimum: 0
         - name: title
           in: query
           description: Case-insensitive substring match on the ad title.
@@ -88,6 +101,11 @@ paths:
           description: Missing Authorization header.
         "429":
           description: Posting quota exceeded (five ads in the previous 24 hours).
+          headers:
+            Retry-After:
+              description: Seconds before retrying.
+              schema:
+                type: integer
         "500":
           description: Unexpected server error.
         "502":
@@ -123,6 +141,8 @@ paths:
           description: All ads imported or original IDs replayed for an identical retry.
         "400":
           description: Invalid body or missing/invalid idempotency key.
+        "413":
+          description: Import contains more than 500 ads or exceeds 2 MiB.
         "409":
           description: Idempotency key reused with a different payload.
         "500":

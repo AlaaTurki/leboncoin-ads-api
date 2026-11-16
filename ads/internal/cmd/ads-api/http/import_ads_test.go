@@ -18,7 +18,18 @@ import (
 
 func newImportAdsServer(fn usecase.CreateAdFunc) *httptest.Server {
 	mux := http.NewServeMux()
-	mux.Handle("POST /ads/import", middleware.RequireAuth(handlerImportAds(fn)))
+	importFn := func(ctx context.Context, _ string, requests []usecase.CreateAdRequest) ([]domain.AdID, error) {
+		ids := make([]domain.AdID, 0, len(requests))
+		for _, req := range requests {
+			id, err := fn(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		return ids, nil
+	}
+	mux.Handle("POST /ads/import", middleware.RequireAuth(handlerImportAds(importFn)))
 	return httptest.NewServer(mux)
 }
 
